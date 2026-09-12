@@ -46,6 +46,8 @@ RÈGLES DE FOND, prioritaires sur le style :
 - Tu n'inventes pas de rumeurs ou d'accusations sur des personnes réelles nommées.
 - Face à une détresse réelle (violence, idées suicidaires, agression), sors du ton léger, exprime une empathie sincère et invite la personne à en parler à un adulte de confiance ou à un professionnel. Ne donne jamais de conseil médical, juridique ou psychologique toi-même.`;
 
+const LEXICON_CATEGORY = 'lexique';
+
 const MAX_TOKENS_DEFAULT = 300;
 const MAX_TOKENS_CEILING = 1024;
 
@@ -63,6 +65,7 @@ export default async ({ req, res, log, error }) => {
     const DATABASE_ID = process.env.DATABASE_ID;
     const COLLECTION_API_KEYS = process.env.COLLECTION_API_KEYS;
     const COLLECTION_API_USAGE_LOGS = process.env.COLLECTION_API_USAGE_LOGS;
+    const COLLECTION_VANESSA_KNOWLEDGE = process.env.COLLECTION_VANESSA_KNOWLEDGE;
     const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
     // Journalise l'appel, quel que soit son issue — c'est la source de
@@ -182,6 +185,27 @@ export default async ({ req, res, log, error }) => {
             MAX_TOKENS_CEILING
         );
 
+        // Lexique — même mécanique et même base que Ça Parle : les
+        // expressions ajoutées côté plateforme enrichissent AUSSI l'API
+        // externe, sans duplication de saisie. Toujours entièrement
+        // incluses (pas de recherche par pertinence ici).
+        let lexiconContext = '';
+        if (COLLECTION_VANESSA_KNOWLEDGE) {
+            try {
+                const lexicon = await databases.listDocuments(DATABASE_ID, COLLECTION_VANESSA_KNOWLEDGE, [
+                    Query.equal('active', true),
+                    Query.equal('category', LEXICON_CATEGORY),
+                    Query.limit(50),
+                ]);
+                if (lexicon.documents.length > 0) {
+                    lexiconContext = '\n\nVOCABULAIRE À RÉUTILISER (mélange-les naturellement, sans les entasser) :\n' +
+                        lexicon.documents.map((l) => `- ${l.content}`).join('\n');
+                }
+            } catch (lexErr) {
+                log(`⚠️ Lexique non chargé (non bloquant) : ${lexErr.message}`);
+            }
+        }
+
         // --- 4. Appel à Claude ---
         const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
@@ -192,7 +216,7 @@ export default async ({ req, res, log, error }) => {
             },
             body: JSON.stringify({
                 model: 'claude-sonnet-5',
-                system: VANESSA_SYSTEM_PROMPT,
+                system: VANESSA_SYSTEM_PROMPT + lexiconContext,
                 messages: normalized,
                 max_tokens: requestedTokens,
             }),
@@ -208,7 +232,12 @@ export default async ({ req, res, log, error }) => {
         }
 
         const data = await response.json();
-        const reply = data.content?.[0]?.text?.trim() || '';
+        // Ne pas prendre content[0] à l'aveugle : claude-sonnet-5 peut
+        // renvoyer un bloc de réflexion interne (type "thinking") avant le
+        // bloc de texte — on cherche explicitement le bloc de type "text".
+        const textBlock = data.content?.find((b) => b.type === 'text');
+        if (!textBlock) log(`⚠️ Aucun bloc "text" dans la réponse Claude : ${JSON.stringify(data.content)}`);
+        const reply = textBlock?.text?.trim() || '';
         const tokensIn = data.usage?.input_tokens || 0;
         const tokensOut = data.usage?.output_tokens || 0;
         const consumed = tokensIn + tokensOut;
