@@ -43,7 +43,29 @@ export default function DocumentationPage() {
   "messages": [
     { "role": "user", "content": "Salut Vanessa, comment ça va ?" }
   ],
-  "max_tokens": 300   // optionnel, 300 par défaut, 1024 maximum
+  "context": "..."     // optionnel, voir section dédiée ci-dessous
+  "max_tokens": 300     // optionnel, 300 par défaut, 1024 maximum
+}`}</CodeBlock>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-bold text-gray-800 mb-2">Le champ <code className="bg-gray-100 px-1.5 py-0.5 rounded text-base">context</code> — cadrer une conversation</h2>
+                    <p className="text-sm text-gray-600 mb-2">
+                        Un texte libre (2000 caractères maximum) qui vient s'ajouter aux instructions de Vanessa — pour
+                        cadrer une conversation autour d'un thème, ou fournir du contenu qu'elle ne connaît pas
+                        autrement (un article, un sujet précis...).
+                    </p>
+                    <p className="text-sm text-gray-600 mb-2">
+                        <strong>Ce n'est pas un champ "system" classique</strong> : il ne peut jamais remplacer ni
+                        désactiver le ton, le style ou les garde-fous de Vanessa — il s'ajoute simplement en complément.
+                        C'est ce qui garantit que Vanessa reste elle-même, avec sa personnalité et ses limites de
+                        sécurité intactes, quel que soit le site ou l'application où elle est intégrée.
+                    </p>
+                    <CodeBlock>{`{
+  "messages": [
+    { "role": "user", "content": "Raconte-moi une histoire" }
+  ],
+  "context": "Cadre toutes tes réponses autour du thème jeunes & aventures."
 }`}</CodeBlock>
                 </section>
 
