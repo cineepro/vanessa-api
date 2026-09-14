@@ -51,6 +51,8 @@ const LEXICON_CATEGORY = 'lexique';
 const MAX_TOKENS_DEFAULT = 300;
 const MAX_TOKENS_CEILING = 1024;
 const MAX_CONTEXT_LENGTH = 2000; // caractères — évite qu'un contexte démesuré gonfle chaque appel
+const RATE_LIMIT_PER_MINUTE = 20; // par clé — protège d'un script qui tirerait en rafale
+const API_VERSION = 'v1';
 
 function hashKey(rawKey) {
     return crypto.createHash('sha256').update(rawKey).digest('hex');
@@ -89,6 +91,37 @@ export default async ({ req, res, log, error }) => {
     }
 
     try {
+        // --- 0. Statut public (/health) — AVANT l'authentification, pour
+        // que n'importe qui (y compris une page de statut publique) puisse
+        // vérifier si le service tourne, sans clé API.
+        if (req.path === '/health' || req.path === `/${API_VERSION}/health`) {
+            let dbOk = false;
+            try {
+                await databases.listDocuments(DATABASE_ID, COLLECTION_API_KEYS, [Query.limit(1)]);
+                dbOk = true;
+            } catch { /* dbOk reste false */ }
+
+            const anthropicConfigured = !!ANTHROPIC_API_KEY;
+            const healthy = dbOk && anthropicConfigured;
+
+            return res.json({
+                status: healthy ? 'ok' : 'degraded',
+                database: dbOk ? 'ok' : 'unreachable',
+                anthropic: anthropicConfigured ? 'configured' : 'missing',
+                timestamp: new Date().toISOString(),
+            }, healthy ? 200 : 503);
+        }
+
+        // --- Versionnement : /v1 est le chemin officiel. La racine "/"
+        // reste acceptée (utile en test/en développement), tout le reste
+        // est rejeté proprement plutôt que de tomber dans le vide.
+        const validPaths = ['/', '', `/${API_VERSION}`, `/${API_VERSION}/`];
+        if (!validPaths.includes(req.path)) {
+            return res.json({
+                error: { type: 'not_found_error', message: `Chemin inconnu. Utilise POST https://api.kinemaplus.com/${API_VERSION}` },
+            }, 404);
+        }
+
         // --- 1. Authentification par clé API ---
         const rawKey = req.headers['x-api-key'] || '';
         if (!rawKey) {
@@ -124,7 +157,35 @@ export default async ({ req, res, log, error }) => {
             }, 403);
         }
 
-        // --- 2. Vérification du quota AVANT tout appel payant ---
+        // --- 2. Limitation de débit (20 requêtes/minute par clé) —
+        // best-effort, pas parfaitement atomique (lecture puis écriture),
+        // suffisant pour bloquer un abus grossier sans complexifier
+        // l'architecture avec un système de verrous distribués.
+        const now = Date.now();
+        const windowStart = keyDoc.rateWindowStart ? new Date(keyDoc.rateWindowStart).getTime() : 0;
+        const windowAgeMs = now - windowStart;
+
+        if (windowAgeMs > 60_000) {
+            // Nouvelle fenêtre d'une minute.
+            await databases.updateDocument(DATABASE_ID, COLLECTION_API_KEYS, keyDoc.$id, {
+                rateWindowStart: new Date(now).toISOString(),
+                rateWindowCount: 1,
+            });
+        } else {
+            const currentRateCount = keyDoc.rateWindowCount || 0;
+            if (currentRateCount >= RATE_LIMIT_PER_MINUTE) {
+                const retryAfterSeconds = Math.ceil((60_000 - windowAgeMs) / 1000);
+                await logUsage(keyDoc, 0, 0, 429, 'rate_limited');
+                return res.json({
+                    error: { type: 'rate_limit_error', message: `Trop de requêtes. Réessaie dans ${retryAfterSeconds} secondes.` },
+                }, 429);
+            }
+            await databases.updateDocument(DATABASE_ID, COLLECTION_API_KEYS, keyDoc.$id, {
+                rateWindowCount: currentRateCount + 1,
+            });
+        }
+
+        // --- 3. Vérification du quota AVANT tout appel payant ---
         const remaining = (keyDoc.tokensGranted || 0) - (keyDoc.tokensUsed || 0);
         if (remaining <= 0) {
             // Bascule le statut pour que les prochains appels soient
@@ -138,7 +199,7 @@ export default async ({ req, res, log, error }) => {
             }, 429);
         }
 
-        // --- 3. Validation de la requête ---
+        // --- 4. Validation de la requête ---
         const body = req.bodyJson ?? JSON.parse(req.body || '{}');
         const { messages, max_tokens, context } = body;
 
@@ -232,7 +293,7 @@ export default async ({ req, res, log, error }) => {
             }
         }
 
-        // --- 4. Appel à Claude ---
+        // --- 5. Appel à Claude ---
         const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -268,7 +329,7 @@ export default async ({ req, res, log, error }) => {
         const tokensOut = data.usage?.output_tokens || 0;
         const consumed = tokensIn + tokensOut;
 
-        // --- 5. Décompte réel + journalisation ---
+        // --- 6. Décompte réel + journalisation ---
         const newUsed = (keyDoc.tokensUsed || 0) + consumed;
         const updates = { tokensUsed: newUsed, lastUsedAt: new Date().toISOString() };
         if (newUsed >= (keyDoc.tokensGranted || 0)) {

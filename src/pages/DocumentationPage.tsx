@@ -30,7 +30,12 @@ export default function DocumentationPage() {
 
                 <section>
                     <h2 className="text-lg font-bold text-gray-800 mb-2">Point d'accès</h2>
-                    <CodeBlock>{`POST ${apiUrl}`}</CodeBlock>
+                    <CodeBlock>{`POST ${apiUrl}/v1`}</CodeBlock>
+                    <p className="text-sm text-gray-600">
+                        Le chemin <code className="bg-gray-100 px-1 rounded text-xs">/v1</code> est celui à utiliser
+                        systématiquement — il garantit que ton intégration continue de fonctionner même si une
+                        future version de l'API venait à changer.
+                    </p>
                 </section>
 
                 <section>
@@ -84,7 +89,7 @@ export default function DocumentationPage() {
 
                 <section>
                     <h2 className="text-lg font-bold text-gray-800 mb-2">Exemple — cURL</h2>
-                    <CodeBlock>{`curl ${apiUrl} \\
+                    <CodeBlock>{`curl ${apiUrl}/v1 \\
   -H "x-api-key: cp_live_votre_cle" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -96,7 +101,7 @@ export default function DocumentationPage() {
 
                 <section>
                     <h2 className="text-lg font-bold text-gray-800 mb-2">Exemple — JavaScript</h2>
-                    <CodeBlock>{`const response = await fetch("${apiUrl}", {
+                    <CodeBlock>{`const response = await fetch("${apiUrl}/v1", {
   method: "POST",
   headers: {
     "x-api-key": "cp_live_votre_cle",
@@ -116,7 +121,7 @@ console.log(data.reply);`}</CodeBlock>
                     <CodeBlock>{`import requests
 
 response = requests.post(
-    "${apiUrl}",
+    "${apiUrl}/v1",
     headers={"x-api-key": "cp_live_votre_cle"},
     json={"messages": [{"role": "user", "content": "Salut Vanessa !"}]},
 )

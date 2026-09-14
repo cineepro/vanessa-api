@@ -21,6 +21,7 @@ export const TopNav = () => {
                 <div className="flex items-center gap-5 flex-1">
                     <Link to="/documentation" className={linkClass('/documentation')}>Documentation</Link>
                     <Link to="/tarifs" className={linkClass('/tarifs')}>Tarifs</Link>
+                    <Link to="/statut" className={linkClass('/statut')}>Statut</Link>
                     {isAuthenticated && <Link to="/console" className={linkClass('/console')}>Console</Link>}
                     {isAuthenticated && profile?.isModerator && (
                         <Link to="/admin" className={linkClass('/admin')}>Administration</Link>
