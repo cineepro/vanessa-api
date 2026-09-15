@@ -35,10 +35,35 @@ export default function StatusPage() {
 
     useEffect(() => {
         check();
-        // Revérifie automatiquement toutes les 30 secondes tant que la
-        // page reste ouverte.
-        const interval = setInterval(check, 30_000);
-        return () => clearInterval(interval);
+        // Revérifie automatiquement toutes les 60 secondes, mais
+        // SEULEMENT tant que l'onglet est réellement visible — inutile de
+        // continuer à interroger le service si la personne a changé
+        // d'onglet ou mis son écran en veille, ça ne fait que gonfler le
+        // nombre d'exécutions pour rien.
+        let interval: ReturnType<typeof setInterval> | null = null;
+
+        const startPolling = () => {
+            if (interval) return;
+            check();
+            interval = setInterval(check, 60_000);
+        };
+        const stopPolling = () => {
+            if (interval) clearInterval(interval);
+            interval = null;
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') startPolling();
+            else stopPolling();
+        };
+
+        if (document.visibilityState === 'visible') startPolling();
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            stopPolling();
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, [check]);
 
     const isUp = health?.status === 'ok';
@@ -50,7 +75,7 @@ export default function StatusPage() {
             <div className="max-w-xl mx-auto px-4 py-16">
                 <div className="text-center mb-8">
                     <h1 className="text-2xl font-bold text-gray-800">Statut de Vanessa API</h1>
-                    <p className="text-sm text-gray-400 mt-1">Vérification en direct, toutes les 30 secondes.</p>
+                    <p className="text-sm text-gray-400 mt-1">Vérification en direct, toutes les 60 secondes.</p>
                 </div>
 
                 <div className={`rounded-3xl border p-6 text-center ${

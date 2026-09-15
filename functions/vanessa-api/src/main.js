@@ -59,6 +59,38 @@ function hashKey(rawKey) {
 }
 
 export default async ({ req, res, log, error }) => {
+    // --- CORS ---
+    // Nécessaire car cette Function est appelée directement par des
+    // navigateurs (ex: la page de statut publique qui interroge /health en
+    // direct) — contrairement aux appels via le SDK Appwrite classique
+    // (account, databases...), qui gèrent déjà le CORS eux-mêmes via les
+    // Platforms enregistrées sur le projet. Une Function personnalisée,
+    // elle, doit gérer ses propres en-têtes.
+    //
+    // Origine volontairement ouverte ("*") : cette API est justement
+    // destinée à être appelée depuis n'importe quel site tiers (Madame
+    // Actu, de futurs clients...) — ce n'est pas une donnée privée
+    // protégée par CORS, c'est un produit public. La vraie protection
+    // reste la clé API elle-même, jamais l'origine de la requête.
+    const CORS_HEADERS = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
+    };
+
+    // Requête préliminaire envoyée automatiquement par le navigateur avant
+    // un vrai appel cross-origin — doit recevoir les en-têtes CORS pour
+    // que le navigateur autorise ensuite la vraie requête.
+    if (req.method === 'OPTIONS') {
+        return res.send('', 204, CORS_HEADERS);
+    }
+
+    // Intercepte res.json une seule fois ici : tous les appels existants
+    // plus bas dans ce fichier (une quinzaine) en bénéficient
+    // automatiquement, sans avoir à tous les modifier un par un.
+    const originalJson = res.json.bind(res);
+    res.json = (body, statusCode = 200) => originalJson(body, statusCode, CORS_HEADERS);
+
     const client = new Client()
         .setEndpoint(process.env.APPWRITE_FUNCTION_API_ENDPOINT)
         .setProject(process.env.APPWRITE_FUNCTION_PROJECT_ID)
